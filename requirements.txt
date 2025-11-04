@@ -1,26 +1,7 @@
---extra-index-url https://pypi.org/simple/
-
-# Core - sin restricciones de versión
+streamlit
 numpy
 pandas
-scipy
-
-# ML
 scikit-learn
-
-# Web
-streamlit
-
-# Visualization
 matplotlib
-seaborn
-
-# Utilities
-requests
-beautifulsoup4
-tqdm
-python-dateutil
 Pillow
-
-# Opencv alternativa (más ligera)
-opencv-python-headless==4.5.5.64
+requests
