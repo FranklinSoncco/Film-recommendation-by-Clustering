@@ -1,24 +1,26 @@
-# Core dependencies
-numpy>=1.21.0,<2.0.0
-pandas>=1.3.0,<2.0.0
-scipy>=1.7.0,<2.0.0
+--extra-index-url https://pypi.org/simple/
 
-# Computer Vision
-opencv-python-headless>=4.5.0,<5.0.0
-Pillow>=8.3.0,<11.0.0
+# Core - sin restricciones de versión
+numpy
+pandas
+scipy
 
-# Machine Learning
-scikit-learn>=0.24.0,<2.0.0
+# ML
+scikit-learn
 
-# Web Framework
-streamlit>=1.28.0
+# Web
+streamlit
 
 # Visualization
-matplotlib>=3.4.0,<4.0.0
-seaborn>=0.11.0,<1.0.0
+matplotlib
+seaborn
 
 # Utilities
-requests>=2.26.0,<3.0.0
-beautifulsoup4>=4.9.3,<5.0.0
-tqdm>=4.62.0,<5.0.0
-python-dateutil>=2.8.0
+requests
+beautifulsoup4
+tqdm
+python-dateutil
+Pillow
+
+# Opencv alternativa (más ligera)
+opencv-python-headless==4.5.5.64
