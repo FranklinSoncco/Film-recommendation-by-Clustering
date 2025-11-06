@@ -2,11 +2,11 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from scipy.spatial.distance import cdist
-import matplotlib.pyplot as plt
 import logging
 from pathlib import Path
 from PIL import Image
 import os
+import pickle
 
 # Configuración de la página
 st.set_page_config(
@@ -23,166 +23,72 @@ logging.basicConfig(
     format='%(asctime)s - %(message)s'
 )
 
-class KMeans:
-    """K-Means clustering from scratch"""
-    
-    def __init__(self, n_clusters=10, max_iter=300, tol=1e-4, random_state=42):
-        self.n_clusters = n_clusters
-        self.max_iter = max_iter
-        self.tol = tol
-        self.random_state = random_state
-        self.centroids = None
-        self.labels_ = None
-        self.inertia_ = None
-    
-    def fit(self, X):
-        """Fit K-Means"""
-        # CONVERSIÓN GARANTIZADA a float64
-        X = np.array(X, dtype=np.float64, copy=True)
-        
-        np.random.seed(self.random_state)
-        n_samples = X.shape[0]
-        
-        # Initialize centroids randomly
-        indices = np.random.choice(n_samples, self.n_clusters, replace=False)
-        self.centroids = X[indices].copy()
-        
-        for iteration in range(self.max_iter):
-            # Assign points to nearest centroid
-            distances = cdist(X, self.centroids, metric='euclidean')
-            labels = np.argmin(distances, axis=1)
-            
-            # Update centroids
-            new_centroids = np.array([X[labels == k].mean(axis=0) 
-                                     for k in range(self.n_clusters)])
-            
-            # Check convergence
-            if np.allclose(self.centroids, new_centroids, atol=self.tol):
-                break
-            
-            self.centroids = new_centroids
-        
-        self.labels_ = labels
-        self.inertia_ = np.sum([np.sum((X[labels == k] - self.centroids[k])**2) 
-                                for k in range(self.n_clusters)])
-        
-        return self
-    
-    def predict(self, X):
-        """Predict cluster labels"""
-        # CONVERSIÓN GARANTIZADA a float64
-        X = np.array(X, dtype=np.float64, copy=True)
-        distances = cdist(X, self.centroids, metric='euclidean')
-        return np.argmin(distances, axis=1)
-
-class GMM:
-    """Gaussian Mixture Model from scratch"""
-    
-    def __init__(self, n_components=10, max_iter=100, tol=1e-3, random_state=42):
-        self.n_components = n_components
-        self.max_iter = max_iter
-        self.tol = tol
-        self.random_state = random_state
-        self.weights_ = None
-        self.means_ = None
-        self.covariances_ = None
-        self.labels_ = None
-    
-    def fit(self, X):
-        """Fit GMM"""
-        # CONVERSIÓN GARANTIZADA a float64
-        X = np.array(X, dtype=np.float64, copy=True)
-        
-        np.random.seed(self.random_state)
-        n_samples, n_features = X.shape
-        
-        # Initialize parameters
-        self.weights_ = np.ones(self.n_components) / self.n_components
-        self.means_ = X[np.random.choice(n_samples, self.n_components, replace=False)]
-        self.covariances_ = np.array([np.eye(n_features) for _ in range(self.n_components)])
-        
-        for iteration in range(self.max_iter):
-            # E-step: Calculate responsibilities
-            responsibilities = self._calculate_responsibilities(X)
-            
-            # M-step: Update parameters
-            new_weights = responsibilities.mean(axis=0)
-            new_means = np.array([
-                np.sum(responsibilities[:, k].reshape(-1, 1) * X, axis=0) / responsibilities[:, k].sum()
-                for k in range(self.n_components)
-            ])
-            
-            # Check convergence
-            if np.abs(new_weights - self.weights_).max() < self.tol:
-                break
-                
-            self.weights_ = new_weights
-            self.means_ = new_means
-        
-        self.labels_ = np.argmax(responsibilities, axis=1)
-        return self
-    
-    def _calculate_responsibilities(self, X):
-        """Calculate responsibilities for E-step"""
-        responsibilities = np.zeros((len(X), self.n_components))
-        for k in range(self.n_components):
-            responsibilities[:, k] = self.weights_[k] * self._multivariate_normal(X, self.means_[k], self.covariances_[k])
-        return responsibilities / responsibilities.sum(axis=1, keepdims=True)
-    
-    def _multivariate_normal(self, X, mean, cov):
-        """Multivariate normal distribution"""
-        n_features = X.shape[1]
-        det = np.linalg.det(cov)
-        norm = 1.0 / (np.power(2 * np.pi, n_features / 2) * np.sqrt(det))
-        inv_cov = np.linalg.inv(cov)
-        diff = X - mean
-        exponent = -0.5 * np.sum(diff @ inv_cov * diff, axis=1)
-        return norm * np.exp(exponent)
-    
-    def predict(self, X):
-        """Predict cluster labels"""
-        # CONVERSIÓN GARANTIZADA a float64
-        X = np.array(X, dtype=np.float64, copy=True)
-        responsibilities = self._calculate_responsibilities(X)
-        return np.argmax(responsibilities, axis=1)
-
-def load_and_validate_features(file_path):
-    """Cargar y validar características garantizando float64"""
+@st.cache_resource
+def load_pretrained_models():
+    """Cargar modelos pre-entrenados desde archivos .pkl"""
     try:
-        df = pd.read_csv(file_path)
-        print(f"✓ Archivo cargado: {df.shape}")
+        # Cargar K-Means
+        with open('trained_models/centroids_KMEANS.pkl', 'rb') as f:
+            kmeans_data = pickle.load(f)
         
-        # CONVERSIÓN AGRESIVA a float64
-        feature_columns = [col for col in df.columns if col.startswith('comp_')]
+        # Cargar GMM
+        with open('trained_models/centroids_GMM.pkl', 'rb') as f:
+            gmm_data = pickle.load(f)
         
-        for col in feature_columns:
-            # Conversión forzada con manejo de errores
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # Eliminar filas con NaN
-        df = df.dropna()
-        
-        # VERIFICACIÓN FINAL
-        for col in feature_columns:
-            if df[col].dtype != np.float64:
-                df[col] = df[col].astype(np.float64)
-        
-        print(f"✓ Tipos de datos finales: {df[feature_columns].dtypes.unique()}")
-        return df
+        print("✓ Modelos pre-entrenados cargados correctamente")
+        return kmeans_data, gmm_data
         
     except Exception as e:
-        print(f"❌ Error cargando {file_path}: {e}")
-        return None
+        st.error(f"❌ Error cargando modelos pre-entrenados: {str(e)}")
+        return None, None
+
+def predict_kmeans_cluster(features, centroids):
+    """Predecir cluster usando centroides de K-Means"""
+    features = np.array(features, dtype=np.float64).reshape(1, -1)
+    distances = cdist(features, centroids, metric='euclidean')
+    return np.argmin(distances, axis=1)[0]
+
+def predict_gmm_cluster(features, means, covariances, weights):
+    """Predecir cluster usando parámetros de GMM"""
+    features = np.array(features, dtype=np.float64).reshape(1, -1)
+    
+    # Calcular responsabilidades
+    responsibilities = np.zeros(len(means))
+    for k in range(len(means)):
+        # Distribución normal multivariada
+        n_features = features.shape[1]
+        det = np.linalg.det(covariances[k])
+        if det <= 0:
+            det = 1e-6
+        norm = 1.0 / (np.power(2 * np.pi, n_features / 2) * np.sqrt(det))
+        inv_cov = np.linalg.inv(covariances[k])
+        diff = features - means[k]
+        exponent = -0.5 * np.sum(diff @ inv_cov * diff, axis=1)
+        responsibilities[k] = weights[k] * norm * np.exp(exponent)
+    
+    # Normalizar y retornar cluster con mayor probabilidad
+    responsibilities /= (responsibilities.sum() + 1e-10)
+    return np.argmax(responsibilities)
 
 @st.cache_resource
 def load_data():
-    """Cargar datos de test"""
+    """Cargar datos de test y modelos pre-entrenados"""
     try:
-        # Cargar características con validación
-        features_df = load_and_validate_features('features_test/HOG_lda_18d.csv')
-        if features_df is None:
-            st.error("❌ Error cargando características")
+        # Cargar características HOG_lda_18d de test
+        features_path = 'features_test/HOG_lda_18d.csv'
+        if not os.path.exists(features_path):
+            st.error(f"❌ Archivo no encontrado: {features_path}")
             return None, None, None
+        
+        features_df = pd.read_csv(features_path)
+        
+        # Convertir características a float64
+        feature_columns = [col for col in features_df.columns if col.startswith('comp_')]
+        for col in feature_columns:
+            features_df[col] = pd.to_numeric(features_df[col], errors='coerce')
+        features_df = features_df.dropna()
+        
+        print(f"✓ Características cargadas: {features_df.shape}")
         
         # Cargar películas de test
         test_movies_path = 'movies_test.csv'
@@ -199,28 +105,35 @@ def load_data():
             st.error("❌ No hay datos coincidentes")
             return None, None, None
         
-        # Preparar características
-        feature_columns = [col for col in features_df.columns if col.startswith('comp_')]
-        X = movies_data[feature_columns].values
+        print(f"✓ Dataset combinado: {len(movies_data)} películas")
         
-        # CONVERSIÓN FINAL GARANTIZADA
-        X = np.array(X, dtype=np.float64, copy=True)
-        print(f"✓ Tipo final de datos: {X.dtype}")
+        # Cargar modelos pre-entrenados
+        kmeans_data, gmm_data = load_pretrained_models()
         
-        # Entrenar modelos
-        kmeans_model = KMeans(n_clusters=10, random_state=42)
-        kmeans_model.fit(X)
+        if kmeans_data is None or gmm_data is None:
+            return None, None, None
         
-        gmm_model = GMM(n_components=10, random_state=42)
-        gmm_model.fit(X)
+        # Predecir clusters para todas las películas de test usando modelos pre-entrenados
+        X = movies_data[feature_columns].values.astype(np.float64)
         
-        # Agregar clusters
-        movies_data = movies_data.copy()
-        movies_data['kmeans_cluster'] = kmeans_model.labels_
-        movies_data['gmm_cluster'] = gmm_model.labels_
+        # Predecir con K-Means
+        kmeans_labels = []
+        for i in range(len(X)):
+            cluster = predict_kmeans_cluster(X[i], kmeans_data['centroids'])
+            kmeans_labels.append(cluster)
+        movies_data['kmeans_cluster'] = kmeans_labels
         
-        print(f"✓ Sistema listo: {len(movies_data)} películas")
-        return movies_data, kmeans_model, gmm_model
+        # Predecir con GMM
+        gmm_labels = []
+        for i in range(len(X)):
+            cluster = predict_gmm_cluster(X[i], gmm_data['means'], 
+                                         gmm_data['covariances'], gmm_data['weights'])
+            gmm_labels.append(cluster)
+        movies_data['gmm_cluster'] = gmm_labels
+        
+        print(f"✓ Clusters asignados correctamente")
+        
+        return movies_data, kmeans_data, gmm_data
         
     except Exception as e:
         st.error(f"❌ Error: {str(e)}")
@@ -273,8 +186,8 @@ def main():
     if 'search_movie_id' not in st.session_state:
         st.session_state.search_movie_id = None
     
-    # Cargar datos
-    movies_data, kmeans_model, gmm_model = load_data()
+    # Cargar datos y modelos pre-entrenados
+    movies_data, kmeans_data, gmm_data = load_data()
     
     if movies_data is None:
         st.error("❌ Error crítico: No se pudieron cargar los datos")
@@ -307,14 +220,13 @@ def main():
     st.title("🎭 Sistema de Recomendación de Películas")
     st.markdown("---")
     
-    # Búsqueda - ENFOQUE ALTERNATIVO: Usar movieId en session_state
+    # Búsqueda
     col1, col2 = st.columns([2, 1])
     with col1:
         search_option = st.radio("Buscar por:", ["Título", "Movie ID"], horizontal=True)
     
     with col2:
         if st.button("🔄 Volver a Vista General", use_container_width=True):
-            # LIMPIAR COMPLETAMENTE el estado
             st.session_state.search_result = None
             st.session_state.search_movie_id = None
             st.rerun()
@@ -331,17 +243,15 @@ def main():
         search_movie = search_movie_df.iloc[0]
         
         if st.button("🔍 Buscar Recomendaciones", type="primary", use_container_width=True):
-            # GUARDAR SOLO EL ID para evitar problemas con session_state
             st.session_state.search_movie_id = search_movie['movieId']
             log_search(search_movie['title'])
             st.rerun()
     
-    # LÓGICA MEJORADA: Recuperar película desde el DataFrame usando ID
+    # Mostrar recomendaciones
     if st.session_state.search_movie_id is not None:
-        # Buscar la película actual desde los datos frescos
         current_movie_df = movies_data[movies_data['movieId'] == st.session_state.search_movie_id]
         if not current_movie_df.empty:
-            show_recommendations(current_movie_df.iloc[0], movies_data, kmeans_model, gmm_model)
+            show_recommendations(current_movie_df.iloc[0], movies_data, kmeans_data, gmm_data)
         else:
             st.error("❌ Película no encontrada")
             st.session_state.search_movie_id = None
@@ -361,9 +271,8 @@ def show_default_view(movies_data):
             display_poster(movie['movieId'], movie['title'], 150)
             st.caption(movie['title'])
 
-def show_recommendations(search_movie, movies_data, kmeans_model, gmm_model):
-    """Mostrar recomendaciones - VERSIÓN ROBUSTA"""
-    # VERIFICACIÓN EXTREMA
+def show_recommendations(search_movie, movies_data, kmeans_data, gmm_data):
+    """Mostrar recomendaciones usando modelos pre-entrenados"""
     if search_movie is None or not isinstance(search_movie, pd.Series):
         st.error("❌ Error: Datos inválidos")
         return
@@ -377,35 +286,35 @@ def show_recommendations(search_movie, movies_data, kmeans_model, gmm_model):
         return
     
     try:
-        # Obtener características con conversión garantizada
+        # Obtener características de la película buscada
         feature_columns = [col for col in movies_data.columns if col.startswith('comp_')]
-        search_features = search_movie[feature_columns].values.reshape(1, -1)
+        search_features = search_movie[feature_columns].values.astype(np.float64)
         
-        # CONVERSIÓN ABSOLUTAMENTE GARANTIZADA
-        search_features = np.array(search_features, dtype=np.float64, copy=True)
-        
-        # Predecir cluster
+        # Determinar cluster según modelo seleccionado
         if st.session_state.model_state:
-            current_cluster = kmeans_model.predict(search_features)[0]
+            # K-Means
+            current_cluster = predict_kmeans_cluster(search_features, kmeans_data['centroids'])
             cluster_movies = movies_data[movies_data['kmeans_cluster'] == current_cluster]
             model_name = "K-means"
         else:
-            current_cluster = gmm_model.predict(search_features)[0]
+            # GMM
+            current_cluster = predict_gmm_cluster(search_features, gmm_data['means'], 
+                                                 gmm_data['covariances'], gmm_data['weights'])
             cluster_movies = movies_data[movies_data['gmm_cluster'] == current_cluster]
             model_name = "GMM"
         
-        # Excluir película actual y calcular similitudes
+        # Excluir película actual
         cluster_movies = cluster_movies[cluster_movies['movieId'] != movie_id]
         
+        # Calcular similitudes (distancia euclidiana inversa)
         similarities = []
-        search_features_flat = search_features.flatten()
-        
         for _, movie in cluster_movies.iterrows():
             movie_features = movie[feature_columns].values.astype(np.float64)
-            similarity = 1 / (1 + np.linalg.norm(search_features_flat - movie_features))
+            distance = np.linalg.norm(search_features - movie_features)
+            similarity = 1 / (1 + distance)
             similarities.append((movie['movieId'], movie['title'], similarity))
         
-        # Ordenar y tomar top 10
+        # Ordenar por similitud y tomar top 10
         similarities.sort(key=lambda x: x[2], reverse=True)
         top_recommendations = similarities[:10]
         
@@ -419,12 +328,13 @@ def show_recommendations(search_movie, movies_data, kmeans_model, gmm_model):
             display_poster(movie_id, title, 250)
             st.success(f"**{title}**")
             st.write(f"**ID:** {movie_id}")
+            st.write(f"**Cluster:** {current_cluster}")
         
         with col2:
             st.subheader(f"📋 Similares (Top {len(top_recommendations)})")
             
             if not top_recommendations:
-                st.warning("No hay películas similares")
+                st.warning("No hay películas similares en este cluster")
                 return
             
             rows = [st.columns(5) for _ in range(2)]
@@ -440,6 +350,8 @@ def show_recommendations(search_movie, movies_data, kmeans_model, gmm_model):
                         
     except Exception as e:
         st.error(f"❌ Error: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
 
 if __name__ == "__main__":
     main()
